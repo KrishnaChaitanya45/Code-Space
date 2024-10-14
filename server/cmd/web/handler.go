@@ -8,6 +8,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
+
+	"github.com/google/uuid"
 )
 
 func (app *App) GetLoginForm(w http.ResponseWriter, r *http.Request) {
@@ -140,4 +143,83 @@ func GetGithubData(accessToken string) string {
 
 	// Convert byte slice to string and return
 	return string(res)
+}
+
+func (app App) ExecuteCode(w http.ResponseWriter, r *http.Request) {
+	/*
+
+		?{
+			? Code : string
+			? Language : string
+		?}
+
+	*/
+	type RequestBody struct {
+		Code     string
+		Language string
+	}
+	var requestBody RequestBody
+	err := json.NewDecoder(r.Body).Decode(&requestBody)
+	if err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+	createFile := func(code string, language string) string {
+		randomString := uuid.NewString()
+		extention := ""
+		switch language {
+		case "js":
+			extention = "js"
+		case "python":
+			extention = "py"
+		case "go":
+			extention = "go"
+		}
+
+		return fmt.Sprintf("%s.%s", randomString, extention)
+	}
+	executeTheProgram := func(code string, language string, fileName string) []byte {
+		cmd := ""
+		additional := " "
+		switch language {
+		case "js":
+			cmd = "node"
+		case "python":
+			cmd = "python"
+		case "go":
+			cmd = "go"
+			additional = "run"
+		}
+		var command *exec.Cmd
+		if additional != "" {
+			command = exec.Command(cmd, additional, fileName)
+
+		} else {
+			command = exec.Command(cmd, fileName)
+
+		}
+
+		stdout, err := command.Output()
+		fmt.Printf("%s OUTPUT %s ERROR", stdout, err)
+		if err != nil {
+			fmt.Println(err.Error())
+			return []byte(err.Error())
+		}
+		return stdout
+	}
+	fileName := createFile(requestBody.Code, requestBody.Language)
+	// path, err := os.Getwd()
+	fmt.Printf("GOT THIS FILENAME %s", fileName)
+	file, err := os.Create(fileName)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("FAILED TO WRITE THE FILE, %s", err.Error()), http.StatusInternalServerError)
+	}
+	file.WriteString(requestBody.Code)
+	output := executeTheProgram(requestBody.Code, requestBody.Language, fileName)
+	file.Close()
+	err = os.Remove(fileName)
+	if err != nil {
+		fmt.Println(fmt.Errorf("ERROR DELETING THE FILE, %s", err.Error()))
+	}
+	w.Write(output)
 }
